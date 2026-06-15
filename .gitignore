@@ -1,0 +1,13 @@
+# Entorno virtual
+venv/
+.venv/
+__pycache__/
+*.pyc
+
+# PyInstaller (Archivos temporales de compilación)
+build/
+*.spec
+
+# El binario final SÍ se puede ignorar (es mejor distribuirlo aparte),
+# pero la carpeta dist completa se suele ignorar:
+dist/
