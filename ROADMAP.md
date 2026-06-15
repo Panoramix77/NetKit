@@ -5,12 +5,12 @@ Este documento define la hoja de ruta y las ideas futuras para la evolución de 
 ## 🔜 Próximas Implementaciones (Backlog)
 
 ### 1. Escáner de Puertos (Port Scanner)
-- **Descripción**: Herramienta para analizar puertos TCP (y opcionalmente UDP) abiertos en un dispositivo destino.
+- **Descripción**: Herramienta para analizar puertos TCP y UDP abiertos en un dispositivo destino sin requerir binarios externos ni permisos de administrador.
 - **Características planeadas**:
-  - Escaneo de puertos comunes (Top 100, Top 1000).
-  - Escaneo de rangos personalizados (ej. `1-65535`).
+  - Escaneo de puertos comunes (Top 100, Top 1000) y rangos personalizados (ej. `1-65535`).
+  - **TCP Sockets (Async):** Ejecución asíncrona concurrente mediante la librería estándar de Python (`asyncio.open_connection`) para escaneo rápido y multiplataforma.
+  - **UDP Scanning (Payload-based):** Escaneo de puertos UDP enviando paquetes específicos de protocolo (ej. consultas DNS para el puerto 53, NTP para el 123) para obtener respuesta a nivel de aplicación sin necesitar raw sockets/root.
   - Identificación básica de servicios por puerto conocido.
-  - Ejecución asíncrona rápida utilizando concurrencia.
 
 ### 2. Gestor de Conexiones Remotas (Estilo MobaXterm)
 - **Descripción**: Un módulo centralizado para almacenar y lanzar conexiones a dispositivos remotos de red.
