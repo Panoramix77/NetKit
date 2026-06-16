@@ -4,13 +4,7 @@ Este documento define la hoja de ruta y las ideas futuras para la evolución de 
 
 ## 🔜 Próximas Implementaciones (Backlog)
 
-### 1. Escáner de Puertos (Port Scanner)
-- **Descripción**: Herramienta para analizar puertos TCP y UDP abiertos en un dispositivo destino sin requerir binarios externos ni permisos de administrador.
-- **Características planeadas**:
-  - Escaneo de puertos comunes (Top 100, Top 1000) y rangos personalizados (ej. `1-65535`).
-  - **TCP Sockets (Async):** Ejecución asíncrona concurrente mediante la librería estándar de Python (`asyncio.open_connection`) para escaneo rápido y multiplataforma.
-  - **UDP Scanning (Payload-based):** Escaneo de puertos UDP enviando paquetes específicos de protocolo (ej. consultas DNS para el puerto 53, NTP para el 123) para obtener respuesta a nivel de aplicación sin necesitar raw sockets/root.
-  - Identificación básica de servicios por puerto conocido.
+
 
 ### 2. Gestor de Conexiones Remotas (Estilo MobaXterm)
 - **Descripción**: Un módulo centralizado para almacenar y lanzar conexiones a dispositivos remotos de red.
@@ -45,3 +39,10 @@ Este documento define la hoja de ruta y las ideas futuras para la evolución de 
 - [x] **Traceroute** asíncrono con salida coloreada.
 - [x] **Escáner LAN** asíncrono con resolución MAC Vendor offline y hostname.
 - [x] Estructura modular separando la interfaz (`tui`) de la lógica (`core`).
+
+### v0.2 - Herramientas Avanzadas y Mejoras TUI
+- [x] **Escáner de Puertos** asíncrono para TCP y UDP.
+- [x] Motor de búsqueda inteligente de destinos (acepta rangos IP, CIDR y listas).
+- [x] Rediseño de la interfaz de Interfaces con formato tabla (`Rich`).
+- [x] Botón de Salida integrado y mejora de altura de cabecera.
+- [x] Agrupación inteligente de resultados y resolución de hostnames/MACs en el escáner de puertos.

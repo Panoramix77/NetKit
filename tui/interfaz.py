@@ -10,7 +10,7 @@ from datetime import datetime
 
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical
-from textual.widgets import Footer, Static, Button, Input, RichLog, ContentSwitcher
+from textual.widgets import Footer, Static, Button, Input, RichLog, ContentSwitcher, Select
 from textual import work
 from textual.reactive import reactive
 
@@ -165,7 +165,9 @@ class NetKitHeader(Horizontal):
     def compose(self) -> ComposeResult:
         yield Static("NetKit - Diagnóstico y comprobación de red", id="header-title")
         yield Static("🔌 Detectando red...", id="header-info")
-        yield Static("", id="header-clock")
+        with Vertical(id="header-right"):
+            yield Static("", id="header-clock")
+            yield Button("Salir", id="btn-quit", variant="error")
 
     def on_mount(self) -> None:
         self.update_clock()
@@ -203,6 +205,7 @@ class NetKitApp(App):
     is_running:       reactive[bool] = reactive(False)
     is_running_trace: reactive[bool] = reactive(False)
     is_running_lan:   reactive[bool] = reactive(False)
+    is_running_ports: reactive[bool] = reactive(False)
 
     # ── CSS completo (dark por defecto + overrides light) ──────────────────
     CSS = """
@@ -218,7 +221,7 @@ class NetKitApp(App):
         background: #161b22;
         color: #58a6ff;
         text-style: bold;
-        height: 1;
+        height: 2;
     }
 
     #header-title {
@@ -234,11 +237,23 @@ class NetKitApp(App):
         text-style: none;
     }
 
+    #header-right {
+        width: 10;
+        align: right top;
+        padding-right: 1;
+    }
+
     #header-clock {
-        width: auto;
+        width: 100%;
         color: #58a6ff;
-        content-align: right middle;
-        padding: 0 2 0 1;
+        content-align: center middle;
+    }
+    
+    #btn-quit {
+        width: 100%;
+        height: 1;
+        min-width: 8;
+        border: none;
     }
 
     Footer {
@@ -330,7 +345,17 @@ class NetKitApp(App):
         margin-bottom: 2;
     }
 
-    #ping-host, #trace-host, #lan-subnet {
+    #ping-host, #trace-host, #lan-subnet, #ports-host {
+        width: 1fr;
+        margin-right: 1;
+    }
+
+    #ports-mode { width: 22; margin-right: 1; }
+    #ports-custom { width: 20; margin-right: 1; }
+    #ports-protocol { width: 12; margin-right: 1; }
+
+    /* Fake selector to keep old format string working if needed */
+    .dummy-placeholder {
         width: 1fr;
         margin-right: 1;
     }
@@ -404,6 +429,7 @@ class NetKitApp(App):
                 yield Button("🌐  Ping", id="btn-ping", classes="tool-btn")
                 yield Button("🔍  Traceroute", id="btn-traceroute", classes="tool-btn")
                 yield Button("📡  Escáner LAN", id="btn-lan", classes="tool-btn")
+                yield Button("🛡️  Escáner Puertos", id="btn-ports", classes="tool-btn")
 
             # ── Contenido principal ──────────────────────────────────────────
             with Vertical(id="content"):
@@ -492,6 +518,30 @@ class NetKitApp(App):
 
                         yield RichLog(id="lan-output", classes="output-log", markup=True, highlight=False, wrap=True)
 
+                    # ── Vista de Escáner de Puertos ──
+                    with Vertical(id="view-ports"):
+                        yield Static("🛡️  ESCÁNER DE PUERTOS", id="tool-name-ports", classes="tool-title")
+                        yield Static(
+                            "Escanea puertos TCP/UDP de un host para descubrir servicios y su estado.",
+                            id="tool-desc-ports",
+                            classes="tool-desc"
+                        )
+                        with Horizontal(id="input-row-ports", classes="input-row-class"):
+                            yield Input(placeholder="Host/IP", id="ports-host")
+                            yield Select(
+                                options=[("Top 100", "top100"), ("Todos (1-65535)", "all"), ("Personalizado", "custom")],
+                                value="top100",
+                                id="ports-mode"
+                            )
+                            yield Input(placeholder="ej. 80,443", id="ports-custom", disabled=True)
+                            yield Select(
+                                options=[("TCP", "tcp"), ("UDP", "udp")],
+                                value="tcp",
+                                id="ports-protocol"
+                            )
+                            yield Button("▶  Escanear", id="run-ports-btn", variant="success")
+                        yield RichLog(id="ports-output", classes="output-log", markup=True, highlight=False, wrap=True)
+
         with Vertical(id="app-bottom"):
             yield Static("Hecho por ❤️  por Panoramix", id="footer-msg")
             yield Footer()
@@ -502,6 +552,7 @@ class NetKitApp(App):
         """Muestra el mensaje de bienvenida al arrancar y carga interfaces."""
         self._trace_worker = None
         self._lan_worker = None
+        self._ports_worker = None
         self.ifaces_text_buffer = ""
         self.ping_text_buffer = ""
         self.trace_text_buffer = ""
@@ -578,6 +629,32 @@ class NetKitApp(App):
         except Exception:
             pass
 
+        # Ports welcome
+        try:
+            log_ports = self.query_one("#ports-output", RichLog)
+            log_ports.clear()
+            log_ports.write("[bold cyan]╔══════════════════════════════════════════╗[/]")
+            log_ports.write("[bold cyan]║      NetKit — Escáner de Puertos         ║[/]")
+            log_ports.write("[bold cyan]╚══════════════════════════════════════════╝[/]")
+            log_ports.write("")
+            log_ports.write("[dim]Descubre los puertos y servicios de equipos remotos.[/]")
+            log_ports.write("")
+            log_ports.write("[bold white]Formatos de Búsqueda:[/]")
+            log_ports.write("  [cyan]● IP o Dominio:[/cyan] [dim]192.168.1.1[/dim] o [dim]google.com[/dim]")
+            log_ports.write("  [cyan]● Red o Rango:[/cyan]  [dim]192.168.1.0/24[/dim] o [dim]192.168.1.1-20[/dim]")
+            log_ports.write("  [cyan]● Abreviaturas:[/cyan] [dim]192.168.1.1, 5, 10[/dim] (escaneará la .1, .5 y .10)")
+            log_ports.write("")
+            log_ports.write("[bold white]Leyenda de Estados:[/]")
+            log_ports.write("[bold green]  ● OPEN[/]          El puerto acepta conexiones.")
+            log_ports.write("[bold yellow]  ● FILTERED[/]      Un firewall bloquea la respuesta.")
+            log_ports.write("[bold red]  ● CLOSED[/]        Accesible pero sin servicio escuchando.")
+            log_ports.write("[bold cyan]  ● OPEN|FILTERED[/] (UDP) Abierto o ignorado por firewall.")
+            log_ports.write("")
+            log_ports.write("[dim]Configura los parámetros y pulsa [bold white]▶ Escanear[/bold white].[/]")
+            log_ports.write("")
+        except Exception:
+            pass
+
     # ── Reactividad ────────────────────────────────────────────────────────
 
     def watch_is_running(self, running: bool) -> None:
@@ -602,6 +679,18 @@ class NetKitApp(App):
                 btn.variant = "error"
             else:
                 btn.label = "▶  Iniciar"
+                btn.variant = "success"
+        except Exception:
+            pass
+
+    def watch_is_running_ports(self, running: bool) -> None:
+        try:
+            btn = self.query_one("#run-ports-btn", Button)
+            if running:
+                btn.label = "⏹  Detener"
+                btn.variant = "error"
+            else:
+                btn.label = "▶  Escanear"
                 btn.variant = "success"
         except Exception:
             pass
@@ -691,6 +780,7 @@ class NetKitApp(App):
     @work(exclusive=True)
     async def _load_interfaces(self) -> None:
         """Carga la información de interfaces en segundo plano y la muestra."""
+        from rich.table import Table
         log = self.query_one("#ifaces-output", RichLog)
         log.clear()
         log.write("[bold cyan]🔄 Buscando interfaces de red en el sistema...[/]")
@@ -709,6 +799,14 @@ class NetKitApp(App):
             return
 
         self.ifaces_text_buffer = ""
+        
+        table = Table(title="Interfaces de Red", show_header=True, header_style="bold cyan", expand=True)
+        table.add_column("Estado", justify="center")
+        table.add_column("Interfaz", style="bold white")
+        table.add_column("MAC Address", style="yellow")
+        table.add_column("IPv4", style="green")
+        table.add_column("IPv6", style="magenta")
+
         for iface in ifaces:
             name = iface["name"]
             status = iface["status"]
@@ -717,34 +815,22 @@ class NetKitApp(App):
             ipv6_list = iface["ipv6"]
 
             status_color = "bright_green" if status == "UP" else ("red" if status == "DOWN" else "yellow")
-            status_icon = "🟢" if status == "UP" else ("🔴" if status == "DOWN" else "🟡")
+            status_icon = "🟢 UP" if status == "UP" else ("🔴 DOWN" if status == "DOWN" else "🟡 UNK")
+            
+            ipv4_str = "\n".join(ipv4_list) if ipv4_list else "[dim]Ninguna[/]"
+            ipv6_str = "\n".join(ipv6_list) if ipv6_list else "[dim]Ninguna[/]"
 
-            log.write(f"[bold cyan]┌────────────────────────────────────────────────────────────[/]")
-            log.write(f"[bold cyan]│[/] {status_icon} [bold white]{name}[/]  ([{status_color}]{status}[/])")
-            log.write(f"[bold cyan]├────────────────────────────────────────────────────────────[/]")
-            log.write(f"[bold cyan]│[/] [dim]🔌 MAC:[/]    [yellow]{mac}[/]")
+            table.add_row(
+                f"[{status_color}]{status_icon}[/]",
+                name,
+                mac,
+                ipv4_str,
+                ipv6_str
+            )
+            
+            self.ifaces_text_buffer += f"{status} | {name} | {mac} | {', '.join(ipv4_list)} | {', '.join(ipv6_list)}\n"
 
-            self.ifaces_text_buffer += "┌────────────────────────────────────────────────────────────\n"
-            self.ifaces_text_buffer += f"│ {name} ({status})\n"
-            self.ifaces_text_buffer += "├────────────────────────────────────────────────────────────\n"
-            self.ifaces_text_buffer += f"│ MAC:    {mac}\n"
-
-            if ipv4_list:
-                for ip in ipv4_list:
-                    log.write(f"[bold cyan]│[/] [dim]🌐 IPv4:[/]   [green]{ip}[/]")
-                    self.ifaces_text_buffer += f"│ IPv4:   {ip}\n"
-            else:
-                log.write(f"[bold cyan]│[/] [dim]🌐 IPv4:[/]   [dim]Ninguna[/]")
-                self.ifaces_text_buffer += "│ IPv4:   Ninguna\n"
-
-            if ipv6_list:
-                for ip in ipv6_list:
-                    log.write(f"[bold cyan]│[/] [dim]🔒 IPv6:[/]   [magenta]{ip}[/]")
-                    self.ifaces_text_buffer += f"│ IPv6:   {ip}\n"
-
-            log.write(f"[bold cyan]└────────────────────────────────────────────────────────────[/]")
-            log.write("")
-            self.ifaces_text_buffer += "└────────────────────────────────────────────────────────────\n\n"
+        log.write(table)
 
     def _execute_trace(self) -> None:
         """Inicia o detiene el traceroute según el estado actual."""
@@ -777,6 +863,61 @@ class NetKitApp(App):
             return
 
         self._lan_worker = self._run_lan(subnet)
+
+    def on_select_changed(self, event: Select.Changed) -> None:
+        if event.select.id == "ports-mode":
+            custom_input = self.query_one("#ports-custom", Input)
+            if event.value == "custom":
+                custom_input.disabled = False
+                custom_input.focus()
+            else:
+                custom_input.disabled = True
+
+    def _execute_ports(self) -> None:
+        if self.is_running_ports:
+            if self._ports_worker:
+                self._ports_worker.cancel()
+            return
+
+        host_input = self.query_one("#ports-host", Input).value.strip()
+        if not host_input:
+            self.query_one("#ports-output", RichLog).write("[bold red]⚠  Introduce un host, IP, rango o subred.[/]")
+            return
+
+        ips = red.parse_target_ips(host_input)
+        if not ips:
+            self.query_one("#ports-output", RichLog).write("[bold red]⚠  Formato de destino inválido.[/]")
+            return
+
+        mode = self.query_one("#ports-mode", Select).value
+        protocol = self.query_one("#ports-protocol", Select).value
+        
+        ports = []
+        if mode == "top100":
+            ports = red.get_top_ports()
+        elif mode == "all":
+            ports = list(range(1, 65536))
+        else:
+            custom_str = self.query_one("#ports-custom", Input).value.strip()
+            for part in custom_str.split(","):
+                part = part.strip()
+                if not part: continue
+                if "-" in part:
+                    try:
+                        start, end = map(int, part.split("-"))
+                        ports.extend(range(start, end + 1))
+                    except ValueError:
+                        pass
+                else:
+                    try:
+                        ports.append(int(part))
+                    except ValueError:
+                        pass
+            if not ports:
+                self.query_one("#ports-output", RichLog).write("[bold red]⚠  Formato de puertos inválido.[/]")
+                return
+
+        self._ports_worker = self._run_ports(ips, ports, protocol, host_input)
 
     def _execute_calc(self) -> None:
         """Realiza el cálculo de la subred y muestra los resultados exactamente al estilo ipcalc."""
@@ -888,9 +1029,13 @@ class NetKitApp(App):
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         match event.button.id:
+            case "btn-quit":
+                self.exit()
             case "btn-interfaces":
                 self._switch_view("view-interfaces", event.button)
                 self._load_interfaces()
+            case "btn-ports":
+                self._switch_view("view-ports", event.button)
             case "btn-lan":
                 self._switch_view("view-lan", event.button)
             case "btn-calc":
@@ -905,6 +1050,8 @@ class NetKitApp(App):
                 self._execute()
             case "run-trace-btn":
                 self._execute_trace()
+            case "run-ports-btn":
+                self._execute_ports()
             case "run-lan-btn":
                 self._execute_lan()
             case "run-calc-btn":
@@ -928,6 +1075,100 @@ class NetKitApp(App):
         self._show_welcome()
 
     # ── Workers asíncronos ──────────────────────────────────────────────────
+
+    @work(exclusive=True)
+    async def _run_ports(self, ips: list[str], ports: list[int], protocol: str, original_target: str) -> None:
+        log = self.query_one("#ports-output", RichLog)
+        self.is_running_ports = True
+
+        log.clear()
+        log.write(f"[bold white]⟶  Escaneando puertos ({protocol.upper()})[/] en [cyan]{original_target}[/]")
+        log.write(f"[dim]Escaneando {len(ports)} puertos en {len(ips)} hosts ({len(ips)*len(ports)} pruebas)...[/]")
+
+        try:
+            results = []
+            total_scans = len(ips) * len(ports)
+            async for res in red.scan_ports_stream(ips, ports, protocol):
+                results.append(res)
+                if total_scans > 100 and len(results) % 500 == 0:
+                    log.write(f"[dim]Progreso: {len(results)} / {total_scans}...[/]")
+
+            def sort_key(r):
+                import ipaddress
+                st = r["state"]
+                if st == "OPEN": st_val = 0
+                elif st == "FILTERED": st_val = 1
+                elif st == "OPEN|FILTERED": st_val = 2
+                else: st_val = 3
+                
+                try:
+                    ip_val = int(ipaddress.IPv4Address(r["ip"]))
+                except Exception:
+                    ip_val = 0
+                    
+                return (ip_val, st_val, r["port"])
+
+            results.sort(key=sort_key)
+
+            log.auto_scroll = False
+            log.clear()
+            log.write(f"[bold white]⟶  Resultados del escaneo ({protocol.upper()})[/] en [cyan]{original_target}[/]")
+            
+            from itertools import groupby
+            arp_table = red._get_arp_table()
+            
+            for ip, group in groupby(results, key=lambda x: x["ip"]):
+                group_list = list(group)
+                
+                hostname = await red._resolve_hostname(ip)
+                mac = arp_table.get(ip, "N/A")
+                vendor = red.get_mac_vendor(mac) if mac != "N/A" else ""
+                
+                host_str = ip
+                if hostname:
+                    host_str += f" [white]({hostname})[/]"
+                if vendor:
+                    host_str += f" [yellow][ {vendor} ][/]"
+                
+                log.write("")
+                log.write(f"[bold cyan]Host: {host_str}[/]")
+                log.write(f"[dim]{'─' * 60}[/]")
+                log.write(f"[bold white]{'PUERTO':<10} {'ESTADO':<15} {'SERVICIO'}[/]")
+                log.write(f"[dim]{'─' * 60}[/]")
+
+                for res in group_list:
+                    port = res["port"]
+                    state = res["state"]
+                    service = res["service"]
+
+                    if state == "CLOSED" and len(ports) > 1000:
+                        continue
+                    
+                    if state == "OPEN": color = "green"
+                    elif state == "FILTERED": color = "yellow"
+                    elif state == "CLOSED": color = "red"
+                    else: color = "cyan"
+                        
+                    log.write(f"{port:<10} [{color}]{state:<15}[/] {service}")
+                
+            if len(ports) > 1000:
+                log.write("")
+                log.write("[dim]Nota: Los puertos cerrados se ocultan por limpieza visual.[/]")
+                
+        except asyncio.CancelledError:
+            log.auto_scroll = False
+            log.write("")
+            log.write("[bold yellow]⏹  Escaneo detenido por el usuario.[/]")
+        finally:
+            log.write("")
+            log.write(f"[dim]{'─' * 60}[/]")
+            log.write("[dim]Finalizado.  (Ctrl+L para limpiar)[/]")
+            
+            log.scroll_home(animate=False)
+            def restore_scroll():
+                log.auto_scroll = True
+            self.call_after_refresh(restore_scroll)
+            self.is_running_ports = False
 
     @work(exclusive=True)
     async def _run_trace(self, host: str) -> None:
@@ -1010,6 +1251,7 @@ class NetKitApp(App):
         log = self.query_one("#lan-output", RichLog)
         self.is_running_lan = True
 
+        log.auto_scroll = False
         log.clear()
         log.write(f"[bold white]⟶  Escaneo de red local[/] → [cyan]{subnet}[/]")
         log.write(f"[dim]{'─' * 110}[/]")
@@ -1072,8 +1314,11 @@ class NetKitApp(App):
                     
                     log.write(line_rich)
                     self.lan_text_buffer += line_plain + "\n"
+                    
+                log.scroll_home(animate=False)
 
         except asyncio.CancelledError:
+            log.auto_scroll = False
             log.write("")
             log.write("[bold yellow]⏹  Escaneo detenido por el usuario.[/]")
             self.lan_text_buffer += "\n⏹  Escaneo detenido por el usuario.\n"
@@ -1082,4 +1327,8 @@ class NetKitApp(App):
             log.write(f"[dim]{'─' * 110}[/]")
             log.write(f"[bold green]✔ Completado. Se encontraron {active_count} dispositivos activos.[/]  (Ctrl+L para limpiar)")
             self.lan_text_buffer += f"\n──────────────────────────────────────────────────────────────────────────────────────────────────────────────\nCompletado. Se encontraron {active_count} dispositivos activos.\n"
+            log.scroll_home(animate=False)
+            def restore_scroll():
+                log.auto_scroll = True
+            self.call_after_refresh(restore_scroll)
             self.is_running_lan = False

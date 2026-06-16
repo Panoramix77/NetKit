@@ -951,3 +951,223 @@ def get_mac_vendor(mac: str) -> str:
 
 
 
+
+# ---------------------------------------------------------------------------
+# Escáner de Puertos
+# ---------------------------------------------------------------------------
+
+UDP_PAYLOADS = {
+    53: b"\x12\x34\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00\x07version\x04bind\x00\x00\x10\x00\x03",
+    123: b"\x1b" + 47 * b"\0",
+    161: b"\x30\x26\x02\x01\x01\x04\x06\x70\x75\x62\x6c\x69\x63\xa0\x19\x02\x04\x0a\x6e\x67\x6b\x02\x01\x00\x02\x01\x00\x30\x0b\x30\x09\x06\x05\x2b\x06\x01\x02\x01\x05\x00",
+    137: b"\x12\x34\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x20\x43\x4b\x41\x41\x41\x41\x41\x41\x41\x41\x41\x41\x41\x41\x41\x41\x41\x41\x41\x41\x41\x41\x41\x41\x41\x41\x41\x41\x41\x41\x41\x41\x00\x00\x21\x00\x01"
+}
+
+def get_service_name(port: int, protocol: str) -> str:
+    import socket
+    try:
+        return socket.getservbyport(port, protocol.lower())
+    except Exception:
+        # Fallback para comunes si no están en el sistema
+        common = {
+            21: "ftp", 22: "ssh", 23: "telnet", 25: "smtp", 53: "domain",
+            80: "http", 110: "pop3", 111: "rpcbind", 135: "msrpc", 139: "netbios-ssn",
+            143: "imap", 443: "https", 445: "microsoft-ds", 993: "imaps", 995: "pop3s",
+            1723: "pptp", 3306: "mysql", 3389: "ms-wbt-server", 5900: "vnc", 8080: "http-proxy"
+        }
+        return common.get(port, "unknown")
+
+async def scan_port(ip: str, port: int, protocol: str = "TCP", timeout: float = 1.0) -> dict:
+    """
+    Escanea un puerto específico (TCP o UDP).
+    Retorna un diccionario con port, protocol, state y service.
+    """
+    import asyncio
+    state = "UNKNOWN"
+    if protocol.upper() == "TCP":
+        try:
+            conn = asyncio.open_connection(ip, port)
+            reader, writer = await asyncio.wait_for(conn, timeout=timeout)
+            writer.close()
+            try:
+                await writer.wait_closed()
+            except Exception:
+                pass
+            state = "OPEN"
+        except asyncio.TimeoutError:
+            state = "FILTERED"
+        except ConnectionRefusedError:
+            state = "CLOSED"
+        except Exception:
+            state = "CLOSED"
+    elif protocol.upper() == "UDP":
+        payload = UDP_PAYLOADS.get(port, b"\x00\x01\x02\x03\r\n")
+        
+        class UDPProtocol(asyncio.DatagramProtocol):
+            def __init__(self):
+                self.transport = None
+                self.response_received = asyncio.Event()
+                self.error_received_event = asyncio.Event()
+
+            def connection_made(self, transport):
+                self.transport = transport
+                transport.sendto(payload)
+
+            def datagram_received(self, data, addr):
+                self.response_received.set()
+
+            def error_received(self, exc):
+                self.error_received_event.set()
+                
+        loop = asyncio.get_running_loop()
+        try:
+            transport, protocol_inst = await loop.create_datagram_endpoint(
+                lambda: UDPProtocol(),
+                remote_addr=(ip, port)
+            )
+            
+            tasks = [
+                asyncio.create_task(protocol_inst.response_received.wait()),
+                asyncio.create_task(protocol_inst.error_received_event.wait())
+            ]
+            done, pending = await asyncio.wait(tasks, timeout=timeout, return_when=asyncio.FIRST_COMPLETED)
+            
+            for task in pending:
+                task.cancel()
+                
+            if not done:
+                state = "OPEN|FILTERED"
+            elif protocol_inst.response_received.is_set():
+                state = "OPEN"
+            elif protocol_inst.error_received_event.is_set():
+                state = "CLOSED"
+            else:
+                state = "OPEN|FILTERED"
+            transport.close()
+        except Exception:
+            state = "CLOSED"
+            
+    service = get_service_name(port, protocol)
+    return {"ip": ip, "port": port, "protocol": protocol.upper(), "state": state, "service": service}
+
+async def scan_ports_stream(ips: list[str], ports: list[int], protocol: str = "TCP", timeout: float = 1.0, max_concurrency: int = 500) -> AsyncIterator[dict]:
+    """
+    Escanea una lista de puertos contra una lista de IPs, cediendo resultados a medida que se completan.
+    """
+    import asyncio
+    semaphore = asyncio.Semaphore(max_concurrency)
+    queue = asyncio.Queue()
+    
+    async def worker(ip: str, port: int):
+        async with semaphore:
+            result = await scan_port(ip, port, protocol, timeout)
+            await queue.put(result)
+            
+    tasks = [asyncio.create_task(worker(i, p)) for i in ips for p in ports]
+    
+    pending = len(tasks)
+    while pending > 0:
+        result = await queue.get()
+        pending -= 1
+        yield result
+        
+    for task in tasks:
+        task.cancel()
+
+def parse_target_ips(target: str) -> list[str]:
+    """Convierte una cadena de destino (IP, CIDR, Rango, o lista por comas) en una lista de IPs."""
+    import ipaddress
+    target = target.strip()
+    if not target:
+        return []
+        
+    ips = []
+    current_prefix = ""
+    
+    parts = [p.strip() for p in target.split(",")]
+    
+    for part in parts:
+        if not part: continue
+        
+        if "/" in part:
+            try:
+                net = ipaddress.IPv4Network(part, strict=False)
+                if net.prefixlen >= 31:
+                    ips.extend([str(ip) for ip in net])
+                else:
+                    ips.extend([str(ip) for ip in net.hosts()])
+                octets = str(net.network_address).split(".")
+                current_prefix = ".".join(octets[:3]) + "."
+            except ValueError:
+                pass
+            continue
+            
+        if "-" in part:
+            rng_parts = part.split("-", 1)
+            start_str = rng_parts[0].strip()
+            end_str = rng_parts[1].strip()
+            
+            if start_str.isdigit() and current_prefix:
+                start_str = current_prefix + start_str
+                
+            try:
+                start_ip = ipaddress.IPv4Address(start_str)
+                start_octets = str(start_ip).split(".")
+                current_prefix = ".".join(start_octets[:3]) + "."
+                
+                if end_str.isdigit():
+                    end_octets = start_str.split(".")
+                    end_octets[-1] = end_str
+                    end_ip = ipaddress.IPv4Address(".".join(end_octets))
+                else:
+                    end_ip = ipaddress.IPv4Address(end_str)
+                    
+                start_int = int(start_ip)
+                end_int = int(end_ip)
+                
+                if start_int <= end_int:
+                    limit = min(end_int + 1, start_int + 65536)
+                    for i in range(start_int, limit):
+                        ips.append(str(ipaddress.IPv4Address(i)))
+            except Exception:
+                pass
+            continue
+            
+        if part.isdigit() and current_prefix:
+            part = current_prefix + part
+            
+        try:
+            ip_obj = ipaddress.IPv4Address(part)
+            ips.append(str(ip_obj))
+            octets = str(ip_obj).split(".")
+            current_prefix = ".".join(octets[:3]) + "."
+        except Exception:
+            ips.append(part)
+            
+    seen = set()
+    result = []
+    for ip in ips:
+        if ip not in seen:
+            seen.add(ip)
+            result.append(ip)
+            
+    return result
+
+def get_top_ports() -> list[int]:
+    """Retorna los 100 puertos más comunes aproximados."""
+    return [
+        20, 21, 22, 23, 25, 53, 67, 68, 69, 80, 110, 111, 119, 123, 135, 137, 138, 139, 143, 161,
+        162, 389, 443, 445, 465, 500, 514, 515, 520, 587, 631, 636, 873, 990, 993, 995, 1025, 1080,
+        1194, 1433, 1434, 1521, 1723, 1812, 1813, 2049, 2121, 2483, 2484, 3128, 3306, 3389, 4500,
+        4899, 5000, 5060, 5061, 5222, 5432, 5631, 5632, 5800, 5900, 5901, 5985, 5986, 6000, 6379,
+        6667, 7000, 8000, 8008, 8080, 8443, 8888, 9000, 9090, 9100, 9418, 9999, 10000, 11211,
+        27017, 27018, 31337, 32768, 49152, 49153, 49154, 49155, 49156, 49157, 50000
+    ]
+
+def get_port_list(mode: str) -> list[int]:
+    if mode == "top100":
+        return get_top_ports()
+    elif mode == "all":
+        return list(range(1, 65536))
+    return [80, 443]
+

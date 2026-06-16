@@ -1,11 +1,11 @@
-# NetKit v0.1 — Panel de Control de Red TUI
+# NetKit v0.2 — Panel de Control de Red TUI
 
 > Herramienta interactiva de diagnóstico y administración de redes desde la terminal.
 
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python&logoColor=white)
 ![Textual](https://img.shields.io/badge/TUI-Textual-brightgreen)
 ![Licencia](https://img.shields.io/badge/Licencia-Privada-orange)
-![Versión](https://img.shields.io/badge/Versión-0.1-blueviolet)
+![Versión](https://img.shields.io/badge/Versión-0.2-blueviolet)
 
 ---
 
@@ -46,6 +46,13 @@ Descubrimiento rápido de dispositivos activos en la red local:
 - **Resolución de hostname** mediante DNS local, mDNS (Avahi/Bonjour) y NetBIOS (nmblookup).
 - **Consulta offline de fabricante MAC (Vendor)** con base de datos integrada de +52.000 entradas OUI.
 - Detección automática de la subred activa al iniciar.
+
+### 🛡️ Escáner de Puertos
+Herramienta avanzada para descubrir puertos abiertos y servicios:
+- **Escaneo asíncrono y ultra-rápido** de puertos TCP y UDP.
+- **Inteligencia de destinos:** escanea IPs individuales, rangos (`192.168.1.1-20`), subredes (`10.0.0.0/24`) o listas abreviadas de hosts.
+- **Agrupación automática** por Host, integrando resolución de nombre de dominio y fabricante MAC de la tarjeta de red.
+- **Detección inteligente de estados:** diferencia claramente entre `OPEN`, `FILTERED`, `CLOSED` y `OPEN|FILTERED`.
 
 ---
 
@@ -170,6 +177,13 @@ NetKit sigue el principio de **separación de responsabilidades**:
 ---
 
 ## 📋 Registro de cambios
+
+### v0.2 — Herramientas Avanzadas y Mejoras TUI
+- **Nuevo:** Escáner de Puertos asíncrono implementado.
+- **Nuevo:** Motor de destinos (acepta rangos, subredes, listas con comas).
+- **Mejora:** Rediseño visual de la tabla de visualización de interfaces.
+- **Mejora:** Integración de nombres de host y MACs en el Escáner de Puertos.
+- **UI:** Añadido un botón en la cabecera superior para salir limpiamente.
 
 ### v0.1 — Lanzamiento Inicial
 - Herramienta de visualización de interfaces de red.
